@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset=utf-8>
+<link href="https://fonts.googleapis.com/css?family=Audiowide" rel="stylesheet"> 
+<title>Planets</title>
+<style>
+body {
+	color: #ffffff;
+	font-family:Monospace;
+	font-size:13px;
+	text-align:center;
+	font-weight: bold;
+	background-color: #050505;
+	margin: 0px;
+	overflow: hidden;
+}
+
+.score {
+	position: absolute ;
+	background: transparent ;
+	color: #0880f0 ;
+	margin: 0px ;
+	font-size: 12pt ;	
+	font-family: 'Audiowide', cursive;
+}
+
+#_3doption {
+	position: absolute ;
+	background: transparent ;
+	left: 10px ;
+	top: 20px ;
+	color: #033060 ;
+}
+#_3doption  input {
+  color: pink ;
+}
+#score {
+	left: 50px ;
+}
+#missiles {
+	left: 200px ;
+}
+#kills {
+	left: 0px ;
+	right: 0px ;
+	text-align: center ;
+}
+#planets {
+	right: 200px ;
+	text-align: right ;
+}
+#level {
+	right: 50px ;
+	text-align: right ;
+}
+
+.level-message {
+	background: transparent ;
+	font-family: 'Audiowide', cursive;
+	font-size: 0pt ;
+	white-space: nowrap;
+	animation-name: whoosh ;
+    animation-duration: 2s ;
+    color: transparent ;
+    position: absolute;
+    top: 50%;
+    left: 50% ;
+    transform: translateY(-50%);
+    transform: translateX(-50%);
+}
+
+@keyframes whoosh {
+    from {
+    	font-size: 72pt ;
+    	color: #0880f0 ;
+    	letter-spacing: 0px ;
+    }
+    to {
+    	color: transparent ;
+    	letter-spacing: 100px ;
+    }
+}
+</style>
+</head>
+<body oncontextmenu="return false;">
+	<script src="js/three.js"></script>
+	<script src="js/shader1.js"></script>
+	<script src="js/effects/AnaglyphEffect.js"></script>
+
+	<div id="_3doption">Anaglyph (red/cyan goggles)<input type='checkbox'></input></div>		
+	
+	<div id="container">
+		<div class="score" id="score"></div>
+		<div class="score" id="missiles"></div>
+		<div class="score" id="kills"></div>
+		<div class="score" id="planets"></div>
+		<div class="score" id="level"></div>
+		<div class="level-message" id="level-message"></div>
+	</div>
+	
+<script>
+
+function generateUUID(){
+    var d = new Date().getTime();
+    if(window.performance && typeof window.performance.now === "function"){
+        d += performance.now(); //use high-precision timer if available
+    }
+    var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = (d + Math.random()*16)%16 | 0;
+        d = Math.floor(d/16);
+        return (c=='x' ? r : (r&0x3|0x8)).toString(16);
+    });
+    return uuid;
+}
+
+function splash( msg ) {
+	var d = document.getElementById( "level-message" ) ;
+	d.textContent = msg ;
+	
+	var newone = d.cloneNode(true);
+	d.parentNode.replaceChild(newone, d);		
+}
+
+function drawScores() {
+	divScore.textContent = score ;
+	divLevel.textContent = "Level " + level ;
+  	divMissiles.textContent = "\u21e1 " + missilesFired ; 	  
+	divPlanets.textContent = "\u2600 " +planets.length ;
+	divKills.textContent = "\u263c " + kills ;
+}
+
+
+function anaglyphClick( event ){
+	anaglyph = event.target.checked ;
+}
+document.getElementById( "_3doption" ).addEventListener( 'click', anaglyphClick, false );
+document.getElementById( "_3doption" ).getElementsByTagName('input')[0].checked = anaglyph ;
+
+var clock = new THREE.Clock();
+	
+const NUM_PLANETS 	= 10 ;
+const PLANET_SIZE 	= 15 ;
+var   PLANET_SPEED 	= 2 ;
+
+const MISSILE_RANGE = 100 ;
+const MISSILE_SIZE 	= 3 ;
+var MISSILE_SPEED 	= 6 ;
+
+const SIGHT_Z_POS 	= 50 ;
+const SIGHT_LIMIT	= 20 ;
+
+const NUM_EXPLOSION_PIECES 	= 270 ;
+const EXPLOSION_SPEED 		= 9 ;
+const EXPLOSION_PIECE_SIZE 	= 3 ;
+
+const stars = [] ;
+const planets = [] ;
+const explosions = [] ;
+var sight = null ; 
+var controls = null ;
+var missile = null ;
+	
+var level = 1 ;
+var score = 0 ;
+var kills = 0 ;
+var missilesFired = 0 ;
+var screensSent = 0 ;
+var sendingMode = false ;
+var secondsSinceScreenshot = 0 ;
+var escapedPlanets = 0 ;
+var firedSinceScreenshot = false ;
+
+const serverMode = "save" ; 	// save or play
+
+var width = window.innerWidth || 2;
+var height = window.innerHeight || 2;
+var windowHalfX = width / 2;
+var windowHalfY = height / 2;
+
+const gameInstance = generateUUID() ;
+
+const container = document.getElementById( 'container' );
+var canvas ;
+const divMissiles = document.getElementById( 'missiles' );
+const divLevel = document.getElementById( 'level' );
+const divPlanets = document.getElementById( 'planets' );
+const divScore = document.getElementById( 'score' );
+const divKills = document.getElementById( 'kills' );
+
+var anaglyph = false ;
+var effect ;
+var renderer ;
+
+
+function start() {
+	init();
+	render();
+}
+var shader1 = new Shader1( start ) ;
+
+/***********************************************************
+
+	E X P L O S I O N
+ 
+*/
+function Explosion( planet, _onDestroy ) {
+  this.pieces = [] ;	
+  this.onDestroy = _onDestroy ;
+  
+  /*
+    Handles the move of each piece in the explosion. 
+    Each move reduces the pieces in the explosion and
+    moves the remioning pieces along their directions.
+  */
+  this.move = function( rate ) {
+  
+   	var r = rate || 1.0 ;
+  
+  	if( this.pieces.length > 0 ) this.remove( this.pieces.pop() ) ;		  	
+  	if( this.pieces.length > 0 ) this.remove( this.pieces.pop() ) ;		  	
+  	if( this.pieces.length > 0 ) this.remove( this.pieces.pop() ) ;		  	
+    for( var i=0 ; i<this.pieces.length ; ++i ) {
+    	piece = this.pieces[i] ;
+    	piece.rotation.x += i/100 ;
+    	piece.position.add( piece.speed.clone().multiplyScalar( r ) ) ; 
+    }
+    if( this.pieces.length === 0 ) {	// once all pieces are gone - destroy the explosion
+    	if( this.onDestroy ) this.onDestroy(this) ;
+    }
+  } ;
+   
+  // create this as a 'subclass' of group 
+  THREE.Group.call( this ) ; 
+  
+  // each explosion pieces is a plane
+  const geometry = new THREE.TetrahedronBufferGeometry( EXPLOSION_PIECE_SIZE ) ;
+  //const material = lava.material ; 
+  const material = new THREE.MeshStandardMaterial( { color: 0xfff0f0 } );				
+  
+  
+  ///-------------------------------
+  // Define each piece & its speed - add it to the pieces[] array
+  for( var i=0 ; i<NUM_EXPLOSION_PIECES ; ++i ) {
+  	var piece = new THREE.Mesh( geometry, material ) ;
+  	piece.position.copy( planet.position ) ;
+  	piece.speed = new THREE.Vector3( Math.random()-0.5, Math.random()-0.5, Math.random()-0.5 ) ;
+  	piece.speed.multiplyScalar( EXPLOSION_SPEED ) ;
+  	this.pieces.push( piece ) ;
+  	this.add( piece ) ;
+  }		  		
+} ;
+Explosion.prototype = Object.create(THREE.Group.prototype);
+
+
+
+/*********************************************
+
+	S I G H T
+	
+*/
+function Sight() {
+  this.missileInFlight = function() {
+    this.remove( this.ring ) ;
+    this.add( this.triangle ) ;
+  }
+  this.missileEndedFlight = function() {
+    this.remove( this.triangle ) ;
+    this.add( this.ring ) ;
+  }
+
+  THREE.Group.call( this ) ; 
+
+  var material = new THREE.MeshBasicMaterial( { color: 0xffffff, wireframe: true } );
+
+  var geometryRing = new THREE.RingBufferGeometry( 2.5, 2.15, 32, 1 );
+  var geometryTriangle = new THREE.RingBufferGeometry( 1.75, 1.5, 4, 1 ) ;
+  
+  this.ring = new THREE.Mesh( geometryRing, material ) ;
+  this.triangle = new THREE.Mesh( geometryTriangle, material ) ;
+  
+  this.missileEndedFlight() ;  
+  				
+  this.x = 0 ;
+  this.y = 0 ;
+  this.z = SIGHT_Z_POS ;
+  
+  this.position.set( this.x, this.y, this.z ) ;
+  
+} ;
+Sight.prototype = Object.create(THREE.Group.prototype);
+
+
+/*********************************************
+
+	M I S S I L E
+	
+*/
+function Missile( _onRemove ) {
+  this.onRemove = _onRemove ;	// callback when a missile is hidden
+  this.lifeRemaining = 0 ;		// when in flight, a missile can make this many moves
+  
+  var geometry = new THREE.IcosahedronBufferGeometry( MISSILE_SIZE );
+  var material = new THREE.MeshNormalMaterial( { } );				
+  THREE.Mesh.call( this, geometry, material ) ;
+  
+  // Sounds 
+  const audioLoader = new THREE.AudioLoader();
+  const audioMissile = new THREE.AudioListener();
+  const soundMissile = new THREE.Audio( audioMissile );
+  soundMissile.setVolume( 0.35 ) ;
+  audioLoader.load( 'audio/missile.mp3', function( buffer ) {
+	soundMissile.setBuffer( buffer );		
+  });
+  this.add( audioMissile );
+  
+/*---------------------------------------------
+  Fire the missile
+*/  		  
+  this.fire = function( sight ) {
+    if( this.lifeRemaining === 0 ) {
+    	soundMissile.play() ;	
+        missilesFired++ ;
+        firedSinceScreenshot = true ;
+		this.lifeRemaining = MISSILE_RANGE ;
+		this.position.set( 0, 0, 10 ) ;
+		this.lookAt( sight.position ) ;
+		this.speed = new THREE.Vector3( 0, 0, MISSILE_SPEED ) ;
+		this.speed.applyEuler( this.rotation ) ;				
+		this.speed.z = -this.speed.z ;
+		sight.missileInFlight() ;
+		scene.add( missile );
+	}
+  } ;
+
+/*---------------------------------------------
+  Hide the missile
+*/  		  
+  this.hide = function() {
+    soundMissile.stop() ;
+    this.lifeRemaining = 0 ;    
+  	if( this.onRemove ) { 
+  		this.onRemove( this ) ; 
+  	}
+  	drawScores() ;   	
+  } ;
+  		  
+/*---------------------------------------------
+  Move the missile one step
+*/  		  
+  this.move = function( rate ) {
+   	var r = rate || 1.0 ;
+  
+    if( this.lifeRemaining > 0 ) {
+	  this.position.add( this.speed.clone().multiplyScalar(r) ) ;
+	  this.rotation.y += 0.1 ;
+
+	  this.lifeRemaining -= r ;
+      drawScores() ;   	
+ 
+	  if( this.lifeRemaining===0 ) {	
+	    this.hide() ;
+	  }
+	}
+  }	;	  
+  
+/*---------------------------------------------
+  Check whether the missile hit a planet
+*/  		    		 
+  this.checkHit = function( planets ) {
+    if( this.lifeRemaining > 0 ) {
+	  for( var i=0 ; i<planets.length ; i++ ) {
+		var planet = planets[i] ;
+		var v = planet.position.clone().sub( this.position ) ;
+		if( v.length() < PLANET_SIZE+MISSILE_SIZE ) {
+			planet.destroy() ;
+			this.hide() ;
+			score += PLANET_SPEED * 100 ;
+			kills++ ;
+			drawScores() ;
+			break ;
+		}
+	  }
+	}				
+  } ;		  		  
+} ;
+Missile.prototype = Object.create(THREE.Mesh.prototype);
+	
+	
+	
+	
+	
+/**************************************************
+
+	P L A N E T
+	
+*/	
+function Planet( _onDestroy ) {
+  this.onDestroy = _onDestroy ;
+  
+  this.reset = function() {
+	this.speed = PLANET_SPEED ;
+	var x = Math.random() * width/5 - width/10; 
+	var y = Math.random() * height/5 - width/10 ;
+	var z = -600 ;  
+	this.position.set( x, y, z );	
+	this.rotation.z = Math.random() * 6.3 ; // 2 x Pi	
+  } ;
+  
+  this.move = function( rate ) {
+  	var r = rate || 1.0 ;
+  	
+  	this.position.z += this.speed * r ;
+ 	this.rotation.y += this.speed * r / 100 ;
+ 	if( this.position.z > 50 ) {
+ 		escapedPlanets++ ;
+ 		score -= 10 ; 			
+ 	    if( score < 0 ) score = 0 ;
+ 		drawScores() ;
+		this.reset() ;
+ 	} 
+  } ;
+  
+  this.destroy = function() {
+    if( this.onDestroy ) {
+      this.onDestroy( this ) ;
+    }  
+    var vol = 75 / ( 100 - this.position.z  ) ;
+	if( vol > 0.1 ) {				
+		if( Planet.prototype.soundExplosion.isPlaying ) {
+			Planet.prototype.soundExplosion.stop() ;
+		}
+		Planet.prototype.soundExplosion.setVolume( vol ) ;
+		Planet.prototype.soundExplosion.play() ;
+	}    
+  } ;
+  
+  const geometry = new THREE.SphereBufferGeometry( PLANET_SIZE, 32, 32 ) ;		  
+  const material = shader1.material ;
+  THREE.Mesh.call( this, geometry, material ) ;
+  this.reset() ;
+  this.position.z = -( Math.random() * 800 ) ;  
+  
+  this.add( Planet.prototype.audioExplosion );	
+  
+} ;
+Planet.prototype = Object.create(THREE.Mesh.prototype);
+Planet.prototype.audioLoader = new THREE.AudioLoader();    
+Planet.prototype.audioExplosion = new THREE.AudioListener();
+Planet.prototype.soundExplosion = new THREE.Audio( Planet.prototype.audioExplosion );
+Planet.prototype.audioLoader.load( 'audio/explosion.mp3', function( buffer ) {
+    Planet.prototype.soundExplosion.setBuffer( buffer );		
+});
+	
+	
+	
+		
+/*================================================================
+
+	 R E N D E R
+	 
+*/
+function render() {
+	var delta = 25 * clock.getDelta();
+	
+	if( sight.position.x > SIGHT_LIMIT ) sight.position.x = SIGHT_LIMIT   ;
+	if( sight.position.x < -SIGHT_LIMIT ) sight.position.x = -SIGHT_LIMIT ;
+	if( sight.position.y > SIGHT_LIMIT ) sight.position.y = SIGHT_LIMIT   ;
+	if( sight.position.y < -SIGHT_LIMIT ) sight.position.y = -SIGHT_LIMIT ;
+	
+	requestAnimationFrame( render );
+	for( var i=0 ; i<planets.length ; i++ ) {
+		planets[i].move( delta ) ;
+	}
+	for( var i=0 ; i<explosions.length ; ++i ) {
+		explosions[i].move( delta ) ;
+	}
+	
+	missile.move() ;
+	missile.checkHit( planets ) ;
+	
+	//lava.uniforms.time.value += 0.2 * delta;
+	shader1.uniforms.time.value += delta * .25;
+
+	renderer.clear();
+	if( anaglyph ) {
+		effect.render( scene, camera );
+	} else {
+		renderer.render( scene,camera) ;
+	}
+	
+	secondsSinceScreenshot += delta ;
+	if( level===1 && sendingMode && secondsSinceScreenshot>12.5 ) {   // ~0.5 seconds ( delta is x 25 )
+		secondsSinceScreenshot = 0 ;
+		sendImageAndReceiveMove() ;
+	}
+}
+
+function onWindowResize( event ) {
+	shader1.uniforms.resolution.value.x = window.innerWidth;
+	shader1.uniforms.resolution.value.y = window.innerHeight;
+	renderer.setSize( window.innerWidth, window.innerHeight );
+	camera.aspect = window.innerWidth / window.innerHeight;
+	camera.updateProjectionMatrix();
+	effect.setSize( window.innerWidth, window.innerHeight );
+}
+
+var mouseDownX = 0 ;
+var mouseDownY = 0 ;
+var sightDownX = 0 ;
+var sightDownY = 0 ;
+	
+function onMouseMove( event ) {
+	if( event.buttons === 2 ) {
+		sight.position.x = sightDownX + ( event.clientX - mouseDownX ) / 10 ; 
+		sight.position.y = sightDownY + ( mouseDownY - event.clientY ) / 10 ;
+		canvas.style.cursor = 'none' ;		
+	} else {
+		canvas.style.cursor = 'inherit' ;		
+	}
+}	
+
+function onMouseDown( event ) {
+	if( (event.buttons & 1) !== 0 && missile.lifeRemaining===0 ) {
+		missile.fire( sight ) ;
+		scene.add( missile );
+	}
+	if( event.buttons & 0x02 ) {
+		sendingMode = true ;
+	
+		mouseDownX = event.clientX ;
+		mouseDownY = event.clientY ;
+		sightDownX = sight.position.x ;
+		sightDownY = sight.position.y ;
+		canvas.style.cursor = 'none' ;				
+	}
+}
+
+
+function onMouseUp( event ) {
+	if( !( event.buttons & 0x02 ) )  {
+		canvas.style.cursor = 'inherit' ;	
+		sendingMode = false ;		
+	}
+}
+
+			
+function onTouchStart(evt) {
+  evt.preventDefault();
+  var touch = evt.changedTouches[0] ;
+  mouseDownX = touch.clientX ;
+  mouseDownY = touch.clientY ;
+  sightDownX = sight.position.x ;
+  sightDownY = sight.position.y ;
+  
+  sendingMode = true ;  
+}
+
+
+function onTouchMove(evt) {
+  evt.preventDefault();
+  var touch = evt.changedTouches[0] ;
+  sight.position.x = sightDownX + ( touch.clientX - mouseDownX ) / 10 ; 
+  sight.position.y = sightDownY + ( mouseDownY - touch.clientY ) / 10 ;
+  
+  sendingMode = true ;    
+}
+
+
+function onTouchEnd(evt) {
+  evt.preventDefault();
+  missile.fire( sight ) ;
+  scene.add( missile );
+  sendingMode = false ;
+}
+
+/*==================================================================
+
+ Initialize everything, objects, missiles etc.
+ 
+ NB this is called once all shaders are loaded - otherwise 
+ things look really bad :)
+*/	
+function init() {
+	splash( "Level " + level ) ;
+	
+	camera = new THREE.PerspectiveCamera( 50, windowHalfX / windowHalfY, 1, 1000 );
+	camera.position.z = 100;
+	scene = new THREE.Scene();
+
+	const audioLoader = new THREE.AudioLoader();
+  	const audioBackground = new THREE.AudioListener();
+	const soundBackground = new THREE.Audio( audioBackground );
+	soundBackground.loop = true;
+  	soundBackground.setVolume( 0.7 ) ;
+  	audioLoader.load( 'audio/background.mp3', function( buffer ) {
+		soundBackground.setBuffer( buffer );		
+	  	soundBackground.play() ;
+  	});
+
+	
+///-------------------------
+// Create a renderer
+	renderer = new THREE.WebGLRenderer( { antialias: true, preserveDrawingBuffer: false } );
+	renderer.setPixelRatio( window.devicePixelRatio );
+	container.appendChild( renderer.domElement );
+	canvas = container.getElementsByTagName("canvas")[0] ;
+	
+	renderer.autoClear = false;
+	
+	effect = new THREE.AnaglyphEffect( renderer );
+	effect.setSize( width, height );
+				
+///-------------------------
+// Add 2 headlights
+	const light1 = new THREE.PointLight( 0xffffff, 3, 1000, 0 );
+	light1.position.set( -10, 0, 50);
+	scene.add(light1);
+
+	const light2 = new THREE.PointLight( 0xffffff, 3, 1000, 0 );
+	light2.position.set( 10, 0, 50);
+	scene.add(light2);
+
+///-------------------------
+// Add the sight & missile
+
+	sight = new Sight() ;
+	scene.add( sight ) ;
+	
+	missile = new Missile( function(m) { 
+		scene.remove(m);
+		sight.missileEndedFlight() ;
+		}) ;
+
+			
+///--------------------------
+// define the window event listeners				
+	window.addEventListener( 'resize', onWindowResize, false );
+	container.addEventListener( 'mousemove', onMouseMove, false );			
+	container.addEventListener( 'mousedown', onMouseDown, false );			
+	container.addEventListener( 'mouseup',   onMouseUp, false );			
+	container.addEventListener( 'touchstart', onTouchStart, false );			
+	container.addEventListener( 'touchend', onTouchEnd, false );			
+	container.addEventListener( 'touchmove', onTouchMove, false );			
+///--------------------------
+// Now define the planets		
+	
+	function initPlanets() {	
+		for( var i=0 ; i<NUM_PLANETS ; i++ ) {	
+			var planet = new Planet( function( planet ) {
+				var explosion = new Explosion( planet, function(e) {
+				  var ix = explosions.indexOf(e) ;
+				  if( ix >= 0 ) {
+					explosions.splice( ix, 1  ) ;
+				  } 
+				  scene.remove( e ) ;
+				} ) ;
+				explosions.push( explosion ) ;
+				scene.add( explosion ) ;
+				scene.remove( planet ) ; 
+				var ix = planets.indexOf(planet) ;
+				if( ix >= 0 ) {
+					planets.splice( ix, 1  ) ;
+				}
+				if( planets.length === 0 ) {
+				  level++ ;
+				  if( escapedPlanets === 0 ) {
+				  	splash( "Perfect" ) ;
+				  	score += 10000 ;
+				  } else {
+  				    splash( "Level " + level ) ;
+				  }
+				  initPlanets() ;
+				  PLANET_SPEED++ ;
+				  MISSILE_SPEED++ ;
+				  escapedPlanets = 0 ;
+				} 
+			}) ;
+			planet.position.z -= 700 ;
+			planets.push( planet ) ;
+			scene.add( planet );
+		}
+	}
+	initPlanets() ;		
+			
+///-------------------------				
+// initialize the window size		
+	onWindowResize();
+	
+	drawScores() ;				
+}
+
+
+
+function sendImageAndReceiveMove() {
+
+	var image = canvas.toDataURL("image/jpeg") ;
+
+	const url = "send_img/";
+	var http = new XMLHttpRequest() ;
+	http.open("POST", url+score+"/"+sight.position.x+"/"+sight.position.y+"/"+firedSinceScreenshot, true);
+	firedSinceScreenshot = false ;
+
+//Send the proper header information along with the request
+	http.setRequestHeader("Content-type", "application/octet-stream");
+	http.setRequestHeader("X-Game-Instance", gameInstance );
+	http.setRequestHeader("X-Server-Mode", serverMode ) ;
+
+	http.onreadystatechange = function() {   
+		if(http.readyState === 4 ) { 
+			if( http.status === 200) {
+				if( serverMode === "play" ) {
+					var move = JSON.parse( http.responseText ) ;
+					sight.position.x += move.x ;
+					sight.position.y += move.y ;
+					if( move.fire ) {
+						missile.fire( sight ) ;
+					}
+					sendingMode = true ;
+				}				
+			} else {
+				console.log( "Error in posting screenshot", http.statusText ) ;
+				sendingMode = false ;
+			}
+		}
+	}
+	http.send(image) ;
+	screensSent++ ;
+}
+
+</script>
+	
+</body>
+</html>
