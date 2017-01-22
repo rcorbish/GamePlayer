@@ -19,8 +19,9 @@ import spark.Response;
 
 public class HandleImage {
 	static Logger logger = LoggerFactory.getLogger( HandleImage.class ) ;
-	public static int TARGET_WIDTH = 80 ;
-	public static int TARGET_HEIGHT = 50 ;
+	public static int TARGET_WIDTH = 128 ;
+	public static int TARGET_HEIGHT = 96 ;
+	public static int TARGET_CHANNELS = 3 ;
 	
 	private Dense dense ;
 	private SaveData saver ;
@@ -29,6 +30,18 @@ public class HandleImage {
 	public HandleImage() throws ClassNotFoundException, IOException {
 		dense = null ;
 		saver = null ;
+		new Thread( new Runnable() {
+			public void run() {
+				Thread.currentThread().setName( "Network Creator" ) ;
+				try {
+					logger.info( "Creating network in the background" );
+					dense = new Dense( TARGET_WIDTH, TARGET_HEIGHT ) ;
+					logger.info( "Network ready to play" ) ;
+				} catch (ClassNotFoundException | IOException e) {
+					logger.error( "Cannot create dense network", e ); 
+				}
+			}
+		} ).start() ;
 	}
 	
 	public String post( Request req, Response rsp ) {
@@ -60,25 +73,27 @@ public class HandleImage {
 			byte raw[] = Base64.getDecoder().decode( base64.substring( ix+1 ) ) ;
 			BufferedImage colorImage = ImageIO.read( new ByteArrayInputStream(raw) ) ;
 			numi++ ;
-			//File outputfile = new File("saved" + numi + ".png");
-			//ImageIO.write(colorImage, "png", outputfile);
 			
-			BufferedImage scaledImage = new BufferedImage( TARGET_WIDTH, TARGET_HEIGHT, BufferedImage.TYPE_BYTE_GRAY ) ;
+			BufferedImage scaledImage = new BufferedImage( TARGET_WIDTH, TARGET_HEIGHT, BufferedImage.TYPE_3BYTE_BGR ) ;
 			Graphics2D gi = scaledImage.createGraphics();
 		    gi.setRenderingHint(
 		    	    RenderingHints.KEY_INTERPOLATION,
 		    	    RenderingHints.VALUE_INTERPOLATION_BILINEAR
 		    	);
 		    gi.drawImage(colorImage, 0, 0, TARGET_WIDTH, TARGET_HEIGHT, null );
-		    
+
+			File outputfile = new File("src/main/resources/data/saved" + numi + ".png");
+			//ImageIO.write(scaledImage, "png", outputfile);
+
 		    DataBuffer db = scaledImage.getRaster().getDataBuffer() ;
 		    logger.debug( "Image reduced and decolored" ) ;
 		    ProposedMove rc = ProposedMove.NULL_MOVE ;
 		    if( "play".equals(mode) ) {
-		    	if( dense == null ) dense = new Dense( TARGET_WIDTH, TARGET_HEIGHT ) ;
-			    rc = dense.processData( db ) ;
+		    	if( dense != null ) {
+		    		rc = dense.processData( db ) ;
+		    	}
 		    } else if( "save".equals(mode) ) {
-		    	if( saver == null ) saver = new SaveData( TARGET_WIDTH, TARGET_HEIGHT ) ;
+		    	if( saver == null ) saver = new SaveData( TARGET_WIDTH, TARGET_HEIGHT, TARGET_CHANNELS ) ;
 		    	rc = saver.processData( db, from, score, x, y, fire ) ;
 		    }
 		    logger.debug( "Sending {} as a response.", rc.toJson() ) ;

@@ -17,33 +17,33 @@ import org.slf4j.LoggerFactory;
 public class SaveData {
 
 	private static Logger logger = LoggerFactory.getLogger(SaveData.class);
-		
-	public static int BATCH_SIZE = 10 ;
-	
-	public static int NUM_LAYERS  = 5 ;
-	public static int SCORE_GRADUATIONS = 10 ;
-	public static int NUM_OUTPUTS = 50 ;   // 5 x 5 * 2   === see convertMoveToIndex for details
 
+	public static int BATCH_SIZE = 10 ;
+
+	public static int NUM_X_BLOCKS  = 10 ;
+	public static int NUM_Y_BLOCKS  = 10 ;
+	public static int NUM_OUTPUTS = NUM_X_BLOCKS * NUM_Y_BLOCKS * 2 ; // x2 for fire or not
+	public static int SCREEN_X_MIN = -20 ; 
+	public static int SCREEN_X_MAX = 20 ; 
+	public static int SCREEN_X_RANGE = SCREEN_X_MAX - SCREEN_X_MIN ;
+	public static int SCREEN_Y_MIN = -20 ; 
+	public static int SCREEN_Y_MAX = 20 ; 
+	public static int SCREEN_Y_RANGE = SCREEN_Y_MAX - SCREEN_Y_MIN ;
+	public static int X_BLOCK = ( SCREEN_X_RANGE / NUM_X_BLOCKS  ) ;
+	public static int Y_BLOCK = ( SCREEN_Y_RANGE / NUM_Y_BLOCKS  ) ;
 
 	private File parentDir ;
 	private volatile boolean processingAFrame ;
-	private final int numInputs ;
-	private final int numOutputs ;
-	private int batchIndex ;
 
 	private final Map<String,DataWriter> dataWriters ;
-	
-	public SaveData( int imageWidth, int imageHeight ) {
-		
-		numOutputs = NUM_OUTPUTS  ;
-		numInputs = imageWidth * imageHeight + NUM_OUTPUTS ;
-	
-		batchIndex = 0 ;
+
+	public SaveData( int imageWidth, int imageHeight, int imageChannels) {
+
 		processingAFrame = false ;
-		
+
 		parentDir = new File( "./src/main/resources/data/" ) ;
 		dataWriters = new HashMap<>() ;
-		
+
 		final Thread t = new Thread( new Runnable() {			
 			@Override
 			public void run() {
@@ -71,12 +71,12 @@ public class SaveData {
 		t.setName( "DW-Cleanup" ) ;
 		t.start();
 	}
-	
-	
+
+
 	public ProposedMove processData( DataBuffer image, String gameInstance, int score, float x, float y, boolean fire ) throws IOException {
 		if( !processingAFrame ) {
 			processingAFrame = true ;
-			
+
 			DataWriter dw = dataWriters.get( gameInstance ) ;
 			if( dw == null ) {
 				dw = new DataWriter(gameInstance, parentDir) ;
@@ -84,96 +84,93 @@ public class SaveData {
 				logger.info( "Created new data writer {}", gameInstance );
 			}
 			dw.write( image, score, x, y, fire ) ;
-			
+
 			processingAFrame = false ;			
 		}				
 		return ProposedMove.NULL_MOVE ;
 	}
 
-	// dx & dy should be +/- 2
-	// giving 50 possible outputs 5 x 5 * 2
-	// 5 = -2, -1, 0, 1, 2
-	// so 5 moves for x & y  = 25 moves
-	// then x2 for fire or not
-	
-}
 
-class DataWriter implements Closeable {
-	
-	private final File featuresFile ;
-	private final File labelsFile ;
-	private final BufferedWriter featureWriter ;
-	private final BufferedWriter labelWriter ;
-	private float previousX ;
-	private float previousY ;
-	private long lastUpdated ;
-	
-	public DataWriter( String gameInstance, File parentDir ) throws IOException {
 
-		parentDir.mkdirs() ;
-		
-		featuresFile = new File( parentDir, gameInstance + ".features" );
-		labelsFile = new File( parentDir, gameInstance + ".labels" ); 
+	public static class DataWriter implements Closeable {
 
-		featureWriter = new BufferedWriter( new FileWriter(featuresFile,true) ) ;
-		labelWriter = new BufferedWriter( new FileWriter(labelsFile,true) ) ;
-		
-		previousX = 0.f ;
-		previousY = 0.f ;
-		
-	}
+		private static Logger logger = LoggerFactory.getLogger(DataWriter.class);
 
-	public int secondsSinceUpdate() {
-		return (int)( ( System.currentTimeMillis() - lastUpdated ) / 1000 ) ;
-	}
-	
-	protected int convertMoveToIndex( int dx, int dy, boolean fire ) {
-		
-		int clampedX = dx>2 ? 2 : ( dx<-2 ? -2 : dx ) ; 
-		int clampedY = dy>2 ? 2 : ( dy<-2 ? -2 : dy ) ;
-		
-		clampedX += 2 ;
-		clampedY += 2 ;
-		
-		int rc = ( clampedY * 5 + clampedX ) * (fire ? 2 : 1 ) ;
-		
-		return rc ;
-	}
+		private final File featuresFile ;
+		private final File labelsFile ;
+		private final BufferedWriter featureWriter ;
+		private final BufferedWriter labelWriter ;
+		private long lastUpdated ;
 
-	public void write( DataBuffer image, int score, float x, float y, boolean fire ) throws IOException {
+		public DataWriter( String gameInstance, File parentDir ) throws IOException {
 
-		lastUpdated = System.currentTimeMillis() ;
+			parentDir.mkdirs() ;
 
-		int dx = (int)( x - previousX ) ; 
-		int dy = (int)( y - previousY ) ;
-		previousX = x ;
-		previousY = y ;
-		
-		int moveCode = convertMoveToIndex( dx, dy, fire ) ;
+			featuresFile = new File( parentDir, gameInstance + ".features" );
+			labelsFile = new File( parentDir, gameInstance + ".labels" ); 
 
-		StringBuilder sb = new StringBuilder() ;
-		
-		for( int i=0 ; i<image.getSize() ; i++ ) {
-			sb.append( image.getElem(i) ).append( ',' ) ;
+			featureWriter = new BufferedWriter( new FileWriter(featuresFile,true) ) ;
+			labelWriter = new BufferedWriter( new FileWriter(labelsFile,true) ) ;
 		}
-		sb.setCharAt( sb.length()-1, '\n' ) ;
-		featureWriter.write( sb.toString() ) ;
-		
-		sb.setLength(0);
-		sb.append( score ).append(',')
-		  .append( x ).append(',')
-		  .append( y ) ;
-		
-		for( int i=0 ; i<50 ; i++ ) {
-			sb.append(',').append( i==moveCode ? 1 : 0 ) ;
+
+		public int secondsSinceUpdate() {
+			return (int)( ( System.currentTimeMillis() - lastUpdated ) / 1000 ) ;
 		}
-		sb.append('\n') ;
-		
-		labelWriter.write( sb.toString() ) ; 
-	}
-	
-	public void close() throws IOException {
-		featureWriter.close(); 
-		labelWriter.close(); 
+
+		public static int convertDataToIndex( float x, float y, boolean fire ) {
+
+			int xx = (int)( (x-SCREEN_X_MIN) / X_BLOCK ) ;
+			int yy = (int)( (y-SCREEN_Y_MIN) / Y_BLOCK ) ;
+
+			int rc = ( yy * SaveData.NUM_X_BLOCKS + xx ) + (fire ? NUM_X_BLOCKS*NUM_Y_BLOCKS : 0 ) ;
+			logger.debug( "{},{} {} => {}", x, y, (fire?" + FIRE":""), rc );
+			return rc ;
+		}
+
+		public static ProposedMove convertIndexToData( int moveCode ) {
+
+			int mc = moveCode ;
+			boolean fire = false ;
+			if( mc > (SaveData.NUM_X_BLOCKS*SaveData.NUM_Y_BLOCKS) ) {
+				mc -= (SaveData.NUM_X_BLOCKS*SaveData.NUM_Y_BLOCKS) ;
+				fire = true ;
+			}
+			int x = ( mc % NUM_X_BLOCKS ) * ( SCREEN_X_RANGE / NUM_X_BLOCKS  ) + SCREEN_X_MIN ;
+			int y = ( mc / NUM_X_BLOCKS ) * ( SCREEN_Y_RANGE / NUM_Y_BLOCKS  ) + SCREEN_Y_MIN  ; 
+
+			return new ProposedMove(x, y, fire) ;
+		}
+
+		public void write( DataBuffer image, int score, float x, float y, boolean fire ) throws IOException {
+
+			lastUpdated = System.currentTimeMillis() ;
+
+			int moveCode = convertDataToIndex( x, y, fire ) ;
+
+			StringBuilder sb = new StringBuilder() ;
+
+			for( int i=0 ; i<image.getSize() ; i++ ) {
+				sb.append( image.getElem(i) ).append( ',' ) ;
+			}
+			sb.setCharAt( sb.length()-1, '\n' ) ;
+			featureWriter.write( sb.toString() ) ;
+
+			sb.setLength(0);
+			sb.append( score ).append(',')
+			.append( x ).append(',')
+			.append( y ) ;
+
+			for( int i=0 ; i<SaveData.NUM_OUTPUTS ; i++ ) {
+				sb.append(',').append( i==moveCode ? 1 : 0 ) ;
+			}
+			sb.append('\n') ;
+
+			labelWriter.write( sb.toString() ) ; 
+		}
+
+		public void close() throws IOException {
+			featureWriter.close(); 
+			labelWriter.close(); 
+		}
 	}
 }

@@ -101,6 +101,9 @@ body {
 	
 <script>
 
+const serverMode = "save" ; 
+//const serverMode = "play" ; 
+
 function generateUUID(){
     var d = new Date().getTime();
     if(window.performance && typeof window.performance.now === "function"){
@@ -171,7 +174,6 @@ var secondsSinceScreenshot = 0 ;
 var escapedPlanets = 0 ;
 var firedSinceScreenshot = false ;
 
-const serverMode = "save" ; 	// save or play
 
 var width = window.innerWidth || 2;
 var height = window.innerHeight || 2;
@@ -273,7 +275,7 @@ function Sight() {
 
   var material = new THREE.MeshBasicMaterial( { color: 0xffffff, wireframe: true } );
 
-  var geometryRing = new THREE.RingBufferGeometry( 2.5, 2.15, 32, 1 );
+  var geometryRing = new THREE.RingBufferGeometry( 2.5, 2.25, 32, 1 );
   var geometryTriangle = new THREE.RingBufferGeometry( 1.75, 1.5, 4, 1 ) ;
   
   this.ring = new THREE.Mesh( geometryRing, material ) ;
@@ -540,7 +542,7 @@ function onMouseDown( event ) {
 function onMouseUp( event ) {
 	if( !( event.buttons & 0x02 ) )  {
 		canvas.style.cursor = 'inherit' ;	
-		sendingMode = false ;		
+		sendingMode = serverMode === "play" ;	// don't kill sending in play mode on mouse up		
 	}
 }
 
@@ -571,7 +573,7 @@ function onTouchEnd(evt) {
   evt.preventDefault();
   missile.fire( sight ) ;
   scene.add( missile );
-  sendingMode = false ;
+  sendingMode = serverMode === "play" ;	// don't kill sending in play mode on mouse up		
 }
 
 /*==================================================================

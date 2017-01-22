@@ -6,9 +6,9 @@ public class ProposedMove {
 	
 	public final static ProposedMove NULL_MOVE = new ProposedMove(0, 0, false) ;
 
-	private final int x ;
-	private final int y ;
-	private final boolean fire ;
+	public final int x ;
+	public final int y ;
+	public final boolean fire ;
 	public ProposedMove( int x, int y, boolean fire ) {
 		this.x = x ;
 		this.y = y ;
