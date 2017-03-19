@@ -24,34 +24,24 @@ public class Dense {
 	private Random random = new Random( 300 ) ;
 
 	private int numInputs  ;
-	private int numOutputs  ;
 
 	private INDArray features ;
-	private INDArray labels ;
-
-	private float previousX ;
-	private float previousY ;
-	private int batchIndex ;
 
 	private volatile boolean processingAFrame ;
 	private final File parentDir ;
 
 	MultiLayerNetwork network ;
 	
-	public Dense( int imageWidth, int imageHeight ) throws ClassNotFoundException, IOException {
+	public Dense( int imageWidth, int imageHeight, int imageChannels ) throws ClassNotFoundException, IOException {
 
 		parentDir = new File( "src/main/resources/data/" ) ;
 
-		previousX = 0 ;
-		previousY = 0 ;
-		numOutputs = NUM_OUTPUTS  ;
-		numInputs = imageWidth * imageHeight  ;
+		numInputs = imageWidth * imageHeight * imageChannels ;
 		network = loadModel();
 		
 		logger.info( "Loaded network with {} parameters.", network.numParams() ) ;
 	
 		features = Nd4j.create( 1, numInputs ) ;
-		batchIndex = 0 ;
 		processingAFrame = false ;
 		
 	}
@@ -60,25 +50,33 @@ public class Dense {
 		ProposedMove rc = ProposedMove.NULL_MOVE ;
 		if( !processingAFrame ) {
 			processingAFrame = true ;
-			
-			for( int i=0 ; i<HandleImage.TARGET_HEIGHT * HandleImage.TARGET_WIDTH ; i++ ) {
-				features.putScalar( 0, i, image.getElem(i) ) ;
-			}
-			INDArray guessed = network.output( features ) ;
-			int moveCode = 0 ;
-			float maxProb = 0.f ;
-			int ix[] = new int[3] ;
-			ix[0] = 0 ;
-			ix[2] = 0 ;
-			for( int i=0 ; i<guessed.length() ; i++ ) {
-				ix[1] = i ;
-				if( maxProb < guessed.getFloat( ix ) ) {
-					maxProb = guessed.getFloat( ix ) ;
-					moveCode = i ;
+			try { 
+				for( int i=0 ; i<HandleImage.TARGET_HEIGHT * HandleImage.TARGET_WIDTH * HandleImage.TARGET_CHANNELS  ; i++ ) {
+					features.putScalar( 0, i, image.getElem(i) ) ;
 				}
+				INDArray guessed = network.output( features ) ;
+				int moveCode = 0 ;
+				float maxProb = 0.f ;
+				int ix[] = new int[2] ;
+				ix[0] = 0 ;
+				ix[1] = 0 ;
+//				float cumulativeProbs = 0.f ;
+				for( int i=0 ; i<guessed.length() ; i++ ) {
+					ix[1] = i ;
+					if( maxProb < guessed.getFloat( ix ) ) {
+						maxProb = guessed.getFloat( ix ) ;
+						moveCode = i ;
+					}
+//					cumulativeProbs += guessed.getFloat( ix ) ;
+//					if( random.nextFloat() < cumulativeProbs ) {
+//						moveCode = i ;
+//						break ;
+//					}
+				}
+				rc = SaveData.DataWriter.convertIndexToData( moveCode ) ;
+			} finally {
+				processingAFrame = false ;
 			}
-			rc = convertMoveCode( moveCode ) ;
-			processingAFrame = false ;			
 		}
 		
 		return rc ;
@@ -91,6 +89,7 @@ public class Dense {
 	// then x2 for fire or not
 	
 	protected ProposedMove convertMoveCode( int moveCode ) {
+		
 		
 		boolean fire = false ;
 		if( moveCode > 24 ) {

@@ -713,8 +713,8 @@ function sendImageAndReceiveMove() {
 			if( http.status === 200) {
 				if( serverMode === "play" ) {
 					var move = JSON.parse( http.responseText ) ;
-					sight.position.x += move.x ;
-					sight.position.y += move.y ;
+					sight.position.x = move.x ;
+					sight.position.y = move.y ;
 					if( move.fire ) {
 						missile.fire( sight ) ;
 					}

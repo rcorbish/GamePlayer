@@ -1,21 +1,18 @@
 package com.rc;
 
 import java.io.BufferedReader;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FilenameFilter;
 import java.io.IOException;
-import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Reader;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Random;
 
 import org.deeplearning4j.eval.Evaluation;
 import org.deeplearning4j.nn.api.OptimizationAlgorithm;
@@ -49,8 +46,8 @@ public class AnalyzeFile {
 	private MultiLayerNetwork network ;
 	private File parentDir ;
 	private final int BATCH_SIZE = 100 ;
-	private final int EPOCHS = 25 ;
-	private final int ITERATIONS = 1 ;
+	private final int EPOCHS = 35 ;
+	private final int ITERATIONS = 2 ;
 	
 	public final static int NUM_OUTPUTS = SaveData.NUM_OUTPUTS  ;
 	public final static int NUM_INPUTS = HandleImage.TARGET_HEIGHT * HandleImage.TARGET_WIDTH * HandleImage.TARGET_CHANNELS ;
@@ -101,12 +98,13 @@ public class AnalyzeFile {
 			
 			Evaluation eval = network.evaluate( dsi.test() ) ;
 			logger.info( eval.stats( true ) ) ;
-			
-			File f = new File( parentDir, "stats.txt" ) ;
-			FileOutputStream fos = new FileOutputStream(f) ;
-			fos.write( eval.stats(true).getBytes() ) ;
-			fos.flush();
-			fos.close(); 
+			if( i >= EPOCHS-1 ) {
+				File f = new File( parentDir, "stats.txt" ) ;
+				FileOutputStream fos = new FileOutputStream(f) ;
+				fos.write( eval.stats(true).getBytes() ) ;
+				fos.flush();
+				fos.close();
+			}
 		}		
 		saveModel() ;
 	}
@@ -160,7 +158,7 @@ public class AnalyzeFile {
 				.seed( 100 )
 				.iterations( ITERATIONS )
 				.optimizationAlgo( OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT )
-				.learningRate(0.01)
+				.learningRate( 0.001 )
 				.regularization(true)  
 				.l2( 0.05 )
 				.weightInit(WeightInit.XAVIER )
@@ -170,29 +168,34 @@ public class AnalyzeFile {
 
 		int layerIndex = 0 ;
 		lb
-		.layer(layerIndex++, new ConvolutionLayer.Builder(5,5)
+		.layer(layerIndex++, new ConvolutionLayer.Builder(3,3)
                 .nIn( HandleImage.TARGET_CHANNELS )
                 .name( "Convolution" )
                 .cudnnAlgoMode( AlgoMode.NO_WORKSPACE )
                 .convolutionMode( ConvolutionMode.Same )
                 .stride( 1, 1 )
-                .nOut(5)
-                .activation(Activation.SIGMOID)
+                .nOut(4)
+                .activation(Activation.IDENTITY)
                 .build() )
 		.layer(layerIndex++, new SubsamplingLayer.Builder(SubsamplingLayer.PoolingType.MAX)
                 .name( "Pool " + layerIndex )
-                .kernelSize(3,3)
-                .stride(3,3)
+                .kernelSize(2,2)
+                .stride(2,2)
                 .build())
 		.layer(layerIndex++, new DenseLayer.Builder()
                 .name( "Dense " + layerIndex )
-				.nOut(10000)
-				.activation( Activation.RELU )
+				.nOut(8000)
+				.activation( Activation.TANH )
+				.build() ) 
+		.layer(layerIndex++, new DenseLayer.Builder()
+                .name( "Dense " + layerIndex )
+				.nOut(2000)
+				.activation( Activation.TANH )
 				.build() ) 
 		.layer(layerIndex++, new DenseLayer.Builder()
                 .name( "Dense " + layerIndex )
 				.nOut(1000)
-				.activation( Activation.RELU )
+				.activation( Activation.TANH )
 				.build() ) 
 		.layer( layerIndex++, new OutputLayer.Builder()
                 .name( "Output" )

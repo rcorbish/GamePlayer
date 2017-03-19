@@ -18,5 +18,11 @@ dependencies {
 	runtime 'org.deeplearning4j:deeplearning4j-cuda-8.0:0.7.2'
 	runtime 'org.nd4j:nd4j-cuda-8.0:0.7.2:linux-x86_64'
 	
-    testCompile 'junit:junit:4.12'
+	testCompile 'junit:junit:[4,)'
+}
+
+test {
+ testLogging {
+        events 'started', 'passed'
+    }
 }
