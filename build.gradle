@@ -26,3 +26,8 @@ test {
         events 'started', 'passed'
     }
 }
+
+task copyDepJars(type: Copy) {
+  from configurations.compile
+  into 'jars'
+}
